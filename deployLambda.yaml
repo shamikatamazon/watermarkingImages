@@ -1,0 +1,113 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Resources:
+    ImageBucket:
+        Type: AWS::S3::Bucket
+        Properties:
+            BucketName: assetsoriginbucket56
+            
+    
+    ImageBucketPolicy:
+        Type: AWS::S3::BucketPolicy
+        Properties:
+          Bucket: !Ref ImageBucket
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+                - Action:
+                    - s3:GetObject
+                  Effect: Allow
+                  Principal: '*'
+                  Resource: !Sub arn:aws:s3:::${ImageBucket}/*
+                - Action:
+                    - s3:PutObject
+                  Effect: Allow
+                  Principal:
+                    AWS: !GetAtt LambdaExecutionRole.Arn
+                  Resource: !Sub arn:aws:s3:::${ImageBucket}/*
+                - Action:
+                    - s3:*
+                  Effect: Allow
+                  Principal:
+                    AWS: !GetAtt LambdaExecutionRole.Arn
+                  Resource: !Sub arn:aws:s3:::${ImageBucket}/*
+                - Action:
+                    - s3:*
+                  Effect: Allow
+                  Principal:
+                    AWS : !Join ["",["arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity ", !Ref TheCloudFrontOriginAccessIdentity]]
+                  Resource: !Sub arn:aws:s3:::${ImageBucket}/*
+                    
+            
+    WaterMarkImageFunction:
+        Type: AWS::Lambda::Function
+        Properties:
+            FunctionName: WaterMarkImageFunction
+            Handler: index.handler
+            Role: !GetAtt LambdaExecutionRole.Arn
+            Code:
+                S3Bucket: watermarklambdacode67
+                S3Key: WatermarkFunctionCode
+            Runtime: nodejs14.x
+            MemorySize: 256
+            Timeout: 20
+    
+    LambdaExecutionRole:
+        Type: AWS::IAM::Role
+        Properties:
+          AssumeRolePolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                - lambda.amazonaws.com
+                - edgelambda.amazonaws.com
+              Action: sts:AssumeRole
+          Path: "/service-role/"
+          ManagedPolicyArns:
+            - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+          Path: "/"
+          Policies:
+          - PolicyName: root
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+              - Effect: Allow
+                Action:
+                - logs:*
+                Resource: arn:aws:logs:*:*:*
+              
+    TheCloudFrontDistribution:
+        Type: AWS::CloudFront::Distribution
+        Properties:
+          DistributionConfig:
+            Enabled: true
+            Origins:
+              - DomainName:
+                  !Sub '${ImageBucket}.s3.amazonaws.com'
+                Id: !Sub '${ImageBucket}'
+                S3OriginConfig:
+                  OriginAccessIdentity: !Join [ "", [ "origin-access-identity/cloudfront/", !Ref TheCloudFrontOriginAccessIdentity ] ]
+            DefaultCacheBehavior:
+                Compress: true
+                ForwardedValues:
+                  QueryString: false
+                TargetOriginId: !Sub '${ImageBucket}'
+                ViewerProtocolPolicy: redirect-to-https
+                LambdaFunctionAssociations:
+                  - EventType : origin-response
+                    LambdaFunctionARN: !Join [ "", [!GetAtt WaterMarkImageFunction.Arn, ":13" ]] 
+    
+    TheCloudFrontOriginAccessIdentity:
+        Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+        Properties:
+          CloudFrontOriginAccessIdentityConfig:
+            Comment: 'CloudFront OAI'
+    
+    CloudFrontLambdaPermission:
+        Type: AWS::Lambda::Permission
+        Properties:
+            Action: lambda:GetFunction
+            FunctionName: !Join ["", [!GetAtt WaterMarkImageFunction.Arn, ":13"]]
+            Principal: replicator.lambda.amazonaws.com
+      
